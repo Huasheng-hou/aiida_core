@@ -147,7 +147,6 @@ class IfTest(WorkChain):
     def step2(self):
         self.ctx.s2 = True
 
-
 class TestWorkchain(AiidaTestCase):
     def setUp(self):
         super(TestWorkchain, self).setUp()
@@ -384,6 +383,108 @@ class TestWorkchain(AiidaTestCase):
         te.shutdown()
 
         return finished_steps
+
+
+class TestImmutableInputWorkchain(AiidaTestCase):
+    """
+    Test that inputs cannot be modified
+    """
+    def setUp(self):
+        super(TestImmutableInputWorkchain, self).setUp()
+        self.assertEquals(len(util.ProcessStack.stack()), 0)
+        self.assertEquals(len(plum.process_monitor.MONITOR.get_pids()), 0)
+
+    def tearDown(self):
+        super(TestImmutableInputWorkchain, self).tearDown()
+        self.assertEquals(len(util.ProcessStack.stack()), 0)
+        self.assertEquals(len(plum.process_monitor.MONITOR.get_pids()), 0)
+
+    def test_immutable_input(self):
+        """
+        Check that self.inputs are not modifiable
+        """
+        test_class = self
+
+        class Wf(WorkChain):
+            @classmethod
+            def define(cls, spec):
+                super(Wf, cls).define(spec)
+                spec.input('a', valid_type=Int)
+                spec.input('b', valid_type=Int)
+                # Try defining an invalid outline
+                spec.outline(
+                    cls.s1,
+                    cls.s2,
+                )
+
+            def s1(self):
+                inputs = self.inputs
+                # I manipulate this 'inputs' dict - I expect that in the next step
+                # self.inputs is not changed
+                with test_class.assertRaises(TypeError): # 'AttributesFrozendict' object does not support item assignment
+                    inputs['a'] = Int(3)
+                with test_class.assertRaises(AttributeError): # AttributeError: 'AttributesFrozendict' object has no attribute 'pop'
+                    inputs.pop('b')
+                with test_class.assertRaises(TypeError): # 'AttributesFrozendict' object does not support item assignment
+                    inputs['c'] = Int(4)
+
+            def s2(self):
+                inputs = self.inputs
+                # a and b should be still there
+                test_class.assertIn('a', inputs)
+                test_class.assertIn('b', inputs)
+                test_class.assertNotIn('c', inputs)
+                # The value should still be the original one, unmodified
+                test_class.assertEquals(inputs['a'].value, 1)
+
+        x = Int(1)
+        y = Int(2)
+        run(Wf, a=x, b=y)
+
+
+    def test_immutable_input_groups(self):
+        """
+        Check that self.inputs.xxx are not modifiable where xxx is an input_group
+        """
+        test_class = self
+
+        class Wf(WorkChain):
+            @classmethod
+            def define(cls, spec):
+                super(Wf, cls).define(spec)
+                spec.input_group('grp')
+                # Try defining an invalid outline
+                spec.outline(
+                    cls.s1,
+                    cls.s2,
+                )
+
+            def s1(self):
+                grp = self.inputs.grp
+                # I manipulate this 'inputs' dict - I expect that in the next step
+                # self.inputs is not changed
+
+                ## If we want the same behavior for group as for inputs, we want these exceptions to be raised
+                ## Otherwise, if the dictionary can be changed, still we want the next test (in step s2) to work.
+                with test_class.assertRaises(TypeError): # 'AttributesFrozendict' object does not support item assignment
+                    grp['one'] = Int(3)
+                with test_class.assertRaises(AttributeError): # AttributeError: 'AttributesFrozendict' object has no attribute 'pop'
+                    grp.pop('two')
+                with test_class.assertRaises(TypeError): # 'AttributesFrozendict' object does not support item assignment
+                    grp['four'] = Int(4)
+
+            def s2(self):
+                grp = self.inputs.grp
+                # a and b should be still there
+                test_class.assertIn('one', grp)
+                test_class.assertIn('two', grp)
+                test_class.assertNotIn('four', grp)
+                # The value should still be the original one, unmodified
+                test_class.assertEquals(grp['one'].value, 1)
+
+        x = Int(1)
+        y = Int(2)
+        run(Wf, grp={'one': x, 'two': y})
 
 
 class TestWorkchainWithOldWorkflows(AiidaTestCase):
